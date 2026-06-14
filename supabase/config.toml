@@ -1,0 +1,13 @@
+project_id = "YOUR_EXTERNAL_SUPABASE_PROJECT_ID"
+
+[functions.analyze-resume]
+verify_jwt = false
+
+[functions.analyze-cover-letter]
+verify_jwt = false
+
+[functions.subscription]
+verify_jwt = false
+
+[functions.razorpay-webhook]
+verify_jwt = false

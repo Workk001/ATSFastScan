@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /results
+
+Sitemap: https://atsfastscan.com/sitemap.xml
