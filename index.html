@@ -32,10 +32,13 @@
     <meta name="twitter:image" content="https://storage.googleapis.com/gpt-engineer-file-uploads/re3uTqIsDyWVjMsZp4fBTkrDefF3/social-images/social-1771794772810-ChatGPT_Image_Feb_22,_2026,_11_20_36_AM.webp">
 
     <!-- Preconnect hints -->
-    <!-- Fonts are self-hosted; no Google Fonts preconnect needed -->
-    <link rel="preconnect" href="https://ats-fastscan-auth.firebaseapp.com" />
-    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" />
+    <!-- Keep these — actually used -->
     <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Add PostHog preconnect — saves 310ms -->
+    <link rel="preconnect" href="https://us-assets.i.posthog.com" />
+    <link rel="preconnect" href="https://us.i.posthog.com" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
