@@ -59,60 +59,81 @@ export function getExternalSupabaseClient(): SupabaseClient {
 
 // Get or create user by Firebase UID
 export async function getOrCreateUser(
-  firebaseUid: string,
+  firebaseUid: string, 
   email: string,
   name?: string
 ): Promise<UserRecord> {
-  const client = getExternalSupabaseClient();
-  
-  // Try to get existing user by firebase_uid
-  const { data: existingUser, error: fetchError } = await client
-    .from("users")
-    .select("*")
-    .eq("firebase_uid", firebaseUid)
-    .single();
+  const supabase = getExternalSupabaseClient();
 
-  if (existingUser && !fetchError) {
-    console.log("[ExternalDB] Found existing user:", firebaseUid);
-    return existingUser as UserRecord;
+  // Step 1: Try to find existing user by firebase_uid
+  const { data: existingUser, error: selectError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('firebase_uid', firebaseUid)
+    .maybeSingle();
+
+  if (existingUser) return existingUser as UserRecord;
+
+  // Step 2: Try to find by email (Firebase migration case)
+  const { data: userByEmail } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (userByEmail) {
+    // Update firebase_uid to new one
+    const { data: updated } = await supabase
+      .from('users')
+      .update({ firebase_uid: firebaseUid })
+      .eq('id', userByEmail.id)
+      .select()
+      .single();
+    return updated as UserRecord;
   }
 
-  // Create new user with FREE plan
+  // Step 3: Create new user
   const now = new Date();
   const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  
-  const newUser = {
-    firebase_uid: firebaseUid,
-    email,
-    name: name || null,
-    plan_type: 'free',
-    subscription_status: null,
-    resume_scans_used_this_month: 0,
-    cover_letter_scans_used_this_month: 0,
-    month_reset_date: nextMonth.toISOString(),
-    subscription_start_date: null,
-    subscription_end_date: null,
-    trial_ends_at: null,
-    cancelled_at: null,
-    razorpay_customer_id: null,
-    razorpay_subscription_id: null,
-    created_at: now.toISOString(),
-    updated_at: now.toISOString(),
-  };
 
-  const { data: createdUser, error: createError } = await client
-    .from("users")
-    .insert(newUser)
+  const { data: newUser, error: insertError } = await supabase
+    .from('users')
+    .insert({
+      firebase_uid: firebaseUid,
+      email: email,
+      name: name || null,
+      plan_type: 'free',
+      subscription_status: null,
+      resume_scans_used_this_month: 0,
+      cover_letter_scans_used_this_month: 0,
+      month_reset_date: nextMonth.toISOString(),
+      subscription_start_date: null,
+      subscription_end_date: null,
+      trial_ends_at: null,
+      cancelled_at: null,
+      razorpay_customer_id: null,
+      razorpay_subscription_id: null,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    })
     .select()
     .single();
 
-  if (createError) {
-    console.error("[ExternalDB] Failed to create user:", createError);
-    throw new Error("Failed to create user record");
+  if (insertError) {
+    // Handle race condition - another request created the user
+    if (insertError.code === '23505') {
+      const { data: racedUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('firebase_uid', firebaseUid)
+        .single();
+      if (racedUser) return racedUser as UserRecord;
+    }
+    console.error("[ExternalDB] Failed to create user:", insertError);
+    throw new Error('Failed to create user record');
   }
 
-  console.log("[ExternalDB] Created new user:", firebaseUid);
-  return createdUser as UserRecord;
+  return newUser as UserRecord;
 }
 
 // Get user by Firebase UID
