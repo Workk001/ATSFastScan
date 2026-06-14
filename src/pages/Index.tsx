@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import HeroSection from "@/components/landing/HeroSection";
 import TrustSection from "@/components/landing/TrustSection";
+import { Helmet } from "react-helmet-async";
 
 const HowItWorks = lazy(() => import("@/components/landing/HowItWorks"));
 const ATSEducationSection = lazy(() => import("@/components/landing/ATSEducationSection"));
@@ -17,6 +18,11 @@ const KeywordCheckerWidget = lazy(() => import("@/components/landing/KeywordChec
 const Index = () => {
   return (
     <div className="min-h-screen flex flex-col">
+      <Helmet>
+        <title>ATS FastScan – Free Resume & Cover Letter ATS Checker with LinkedIn Optimization</title>
+        <meta name="description" content="AI-powered ATS analyzer for resume, cover letter, and LinkedIn profile. Check compatibility with Naukri FastForward, Workday, and Taleo. 2 free scans, no signup." />
+        <link rel="canonical" href="https://www.atsfastscan.com/" />
+      </Helmet>
       <main className="flex-1">
         {/* Above the fold: Hero + Trust — fast to scan, single CTA */}
         <HeroSection />

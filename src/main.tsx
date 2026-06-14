@@ -3,6 +3,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import App from "./App.tsx";
 import "./index.css";
 import posthog from "posthog-js";
+import { HelmetProvider } from "react-helmet-async";
 
 const posthogKey = import.meta.env.VITE_POSTHOG_KEY;
 if (posthogKey) {
@@ -16,7 +17,9 @@ if (posthogKey) {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <AuthProvider>
-    <App />
-  </AuthProvider>
+  <HelmetProvider>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </HelmetProvider>
 );

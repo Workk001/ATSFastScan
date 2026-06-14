@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, Lock, User } from "lucide-react";
 import { isAllowedEmailDomain } from "@/lib/emailValidation";
 import { useAnalytics } from "@/hooks/usePostHog";
+import { Helmet } from "react-helmet-async";
 
 const SignUp = () => {
   const [firstName, setFirstName] = useState("");
@@ -139,6 +140,10 @@ const SignUp = () => {
 
   return (
     <div className="auth-page">
+      <Helmet>
+        <title>Sign Up – ATS FastScan</title>
+        <meta name="robots" content="noindex, follow" />
+      </Helmet>
       <div className="auth-card auth-card-wide">
         <div className="auth-header">
           <h1 className="auth-title">Create Account</h1>

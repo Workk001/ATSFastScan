@@ -3,6 +3,7 @@ import { Calendar, Clock, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 
 const articles = [
   {
@@ -248,6 +249,11 @@ const Blog = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>Blog – ATS & Resume Insights | ATS FastScan</title>
+        <meta name="description" content="Articles on ATS systems, resume optimization, and job application strategies for Naukri, LinkedIn, and Indian employers." />
+        <link rel="canonical" href="https://www.atsfastscan.com/blog" />
+      </Helmet>
       <main className="pt-24 sm:pt-28 lg:pt-32 pb-20">
         {/* Hero Section */}
         <section className="container mx-auto px-4 sm:px-6 lg:px-8 mb-16">

@@ -1,4 +1,5 @@
 import Footer from "@/components/Footer";
+import { Helmet } from "react-helmet-async";
 import {
   Accordion,
   AccordionContent,
@@ -53,6 +54,11 @@ const FAQ = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>FAQ – ATS Scores, Naukri FastForward & More | ATS FastScan</title>
+        <meta name="description" content="Answers to common questions about ATS scores, Naukri FastForward, Workday, Taleo compatibility, and how ATS FastScan analyzes resumes and cover letters." />
+        <link rel="canonical" href="https://www.atsfastscan.com/faq" />
+      </Helmet>
       <main className="pt-20 sm:pt-24 lg:pt-28 pb-16 sm:pb-20">
         {/* Hero Section */}
         <section className="container mx-auto px-4 sm:px-6 lg:px-8 mb-10 sm:mb-16">

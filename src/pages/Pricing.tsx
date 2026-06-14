@@ -9,6 +9,7 @@ import { UpgradeButton } from '@/components/UpgradeButton';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
 import Footer from '@/components/Footer';
+import { Helmet } from 'react-helmet-async';
 
 import {
   PLAN_FEATURES,
@@ -57,6 +58,11 @@ const Pricing = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background relative overflow-hidden">
+      <Helmet>
+        <title>Pricing – Free & Paid ATS Checker Plans | ATS FastScan</title>
+        <meta name="description" content="Free: 2 lifetime resume scans. Plus: ₹299/month for 10 resume + 5 cover letter scans. Pro: ₹599/month unlimited scans." />
+        <link rel="canonical" href="https://www.atsfastscan.com/pricing" />
+      </Helmet>
       {/* Premium Background Effects */}
       
       

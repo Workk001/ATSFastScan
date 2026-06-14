@@ -14,6 +14,7 @@ import LinkedInSection from "@/components/results/LinkedInSection";
 import ActionItems from "@/components/results/ActionItems";
 import PDFExportButton from "@/components/results/PDFExportButton";
 import ATSIncompatibleView from "@/components/results/ATSIncompatibleView";
+import { Helmet } from "react-helmet-async";
 
 import type { ResultData, ATSIncompatibleResult, AnalysisResult } from "@/types/analysis";
 
@@ -39,6 +40,10 @@ const ResultsPage = () => {
   if (isIncompatible) {
     return (
       <div className="min-h-screen flex flex-col">
+        <Helmet>
+          <title>Results – ATS FastScan</title>
+          <meta name="robots" content="noindex, nofollow" />
+        </Helmet>
         <main className="flex-1 pt-24 pb-16">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between gap-4 mb-8 max-w-2xl mx-auto">
@@ -59,6 +64,10 @@ const ResultsPage = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <Helmet>
+        <title>Results – ATS FastScan</title>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <main className="flex-1 pt-24 sm:pt-28 lg:pt-32 pb-16 sm:pb-20 lg:pb-24">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-7xl mx-auto">

@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, Lock, X, ArrowLeft } from "lucide-react";
 import { useAnalytics } from "@/hooks/usePostHog";
+import { Helmet } from "react-helmet-async";
 
 const SignIn = () => {
   const [email, setEmail] = useState("");
@@ -175,6 +176,10 @@ const SignIn = () => {
 
   return (
     <div className="auth-page">
+      <Helmet>
+        <title>Sign In – ATS FastScan</title>
+        <meta name="robots" content="noindex, follow" />
+      </Helmet>
       <div className="auth-card">
         <div className="auth-header">
           <h1 className="auth-title">Welcome Back</h1>

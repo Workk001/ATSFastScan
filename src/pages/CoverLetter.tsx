@@ -11,6 +11,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { ScanLimitModal } from "@/components/ScanLimitModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAnalytics } from "@/hooks/usePostHog";
+import { Helmet } from "react-helmet-async";
 
 const CoverLetterPage = () => {
   const [isDragging, setIsDragging] = useState(false);
@@ -276,6 +277,11 @@ const CoverLetterPage = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <Helmet>
+        <title>Cover Letter ATS Checker – Free AI Analysis | ATS FastScan</title>
+        <meta name="description" content="Check your cover letter for ATS compatibility, keyword match, and tone. One of the few tools that analyzes cover letters alongside resumes." />
+        <link rel="canonical" href="https://www.atsfastscan.com/cover-letter" />
+      </Helmet>
       <main className="flex-1 pt-24 sm:pt-28 lg:pt-32 pb-12 sm:pb-16 lg:pb-20">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-lg lg:max-w-xl mx-auto">

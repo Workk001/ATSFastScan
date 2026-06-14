@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Mail, MessageSquare, Clock, MapPin } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 
 const Contact = () => {
   const [formData, setFormData] = useState({
@@ -50,6 +51,11 @@ const Contact = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>Contact ATS FastScan</title>
+        <meta name="description" content="Get in touch with the ATS FastScan team for support, feedback, or partnership inquiries." />
+        <link rel="canonical" href="https://www.atsfastscan.com/contact" />
+      </Helmet>
       <main className="pt-20 sm:pt-24 lg:pt-28 pb-16 sm:pb-20">
         {/* Hero Section */}
         <section className="container mx-auto px-4 sm:px-6 lg:px-8 mb-12 sm:mb-16">

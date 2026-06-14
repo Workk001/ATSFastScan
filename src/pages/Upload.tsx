@@ -13,6 +13,7 @@ import { ScanLimitModal } from "@/components/ScanLimitModal";
 import AuthRequiredDialog from "@/components/AuthRequiredDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAnalytics } from "@/hooks/usePostHog";
+import { Helmet } from "react-helmet-async";
 
 const UploadPage = () => { 
   const [isDragging, setIsDragging] = useState(false);
@@ -364,6 +365,11 @@ const UploadPage = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <Helmet>
+        <title>Resume ATS Score Checker – Free Scan | ATS FastScan</title>
+        <meta name="description" content="Upload your resume and job description for an instant ATS score, keyword gap analysis, and formatting fixes compatible with Naukri, Workday, and Taleo." />
+        <link rel="canonical" href="https://www.atsfastscan.com/upload" />
+      </Helmet>
       <main className="flex-1 pt-24 sm:pt-28 lg:pt-32 pb-12 sm:pb-16 lg:pb-20">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-lg lg:max-w-xl mx-auto">

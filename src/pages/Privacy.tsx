@@ -1,9 +1,15 @@
 import Footer from "@/components/Footer";
 import { Shield } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 
 const Privacy = () => {
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>Privacy Policy – ATS FastScan</title>
+        <meta name="description" content="ATS FastScan privacy policy covering data handling, resume storage, and user information." />
+        <link rel="canonical" href="https://www.atsfastscan.com/privacy" />
+      </Helmet>
       <main className="pt-24 sm:pt-28 lg:pt-32 pb-20">
         {/* Hero Section */}
         <section className="container mx-auto px-4 sm:px-6 lg:px-8 mb-12">

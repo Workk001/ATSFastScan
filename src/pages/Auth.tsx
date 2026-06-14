@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import Footer from "@/components/Footer";
 import { Zap, Mail, Lock, Chrome } from "lucide-react";
 import { isAllowedEmailDomain } from "@/lib/emailValidation";
+import { Helmet } from "react-helmet-async";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -132,6 +133,10 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <Helmet>
+        <title>Sign In – ATS FastScan</title>
+        <meta name="robots" content="noindex, follow" />
+      </Helmet>
       <main className="flex-1 flex items-center justify-center py-12 px-4">
         <div className="w-full max-w-md">
           {/* Logo */}

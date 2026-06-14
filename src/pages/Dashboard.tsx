@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Footer from '@/components/Footer';
 import { format } from 'date-fns';
 import { getPlanDisplayName, PLAN_DISPLAY_PRICING } from '@/lib/pricing';
+import { Helmet } from 'react-helmet-async';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -40,6 +41,10 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <Helmet>
+        <title>Dashboard – ATS FastScan</title>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <main className="flex-1 pt-20 pb-10 sm:pt-24 sm:pb-12 lg:pt-28 lg:pb-16">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-4xl">
           {/* Header */}

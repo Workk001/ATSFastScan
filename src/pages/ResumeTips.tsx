@@ -1,5 +1,6 @@
 import Footer from "@/components/Footer";
 import { FileText, Target, Layout, Type, CheckCircle, AlertCircle, Lightbulb } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 
 const ResumeTips = () => {
   const tips = [
@@ -46,6 +47,11 @@ const ResumeTips = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>Resume Tips for ATS Compatibility | ATS FastScan</title>
+        <meta name="description" content="Practical tips to make your resume ATS-friendly for Naukri FastForward, Workday, Taleo, and Greenhouse. Improve formatting, keywords, and structure." />
+        <link rel="canonical" href="https://www.atsfastscan.com/resume-tips" />
+      </Helmet>
       <main className="pt-24 sm:pt-28 lg:pt-32 pb-20">
         {/* Hero Section */}
         <section className="container mx-auto px-4 sm:px-6 lg:px-8 mb-16">

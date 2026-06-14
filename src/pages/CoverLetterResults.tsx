@@ -4,6 +4,7 @@ import { FileText, Download, RotateCcw, CheckCircle, AlertTriangle, Zap, Message
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import Footer from "@/components/Footer";
+import { Helmet } from "react-helmet-async";
 
 interface CoverLetterResult {
   score: number;
@@ -103,6 +104,10 @@ const CoverLetterResults = () => {
   if (!result) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
+        <Helmet>
+          <title>Cover Letter Results – ATS FastScan</title>
+          <meta name="robots" content="noindex, nofollow" />
+        </Helmet>
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
           <p className="text-muted-foreground">Loading results...</p>
@@ -116,6 +121,10 @@ const CoverLetterResults = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <Helmet>
+        <title>Cover Letter Results – ATS FastScan</title>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <main className="flex-1 pt-24 sm:pt-28 lg:pt-32 pb-8 lg:pb-12">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-5xl mx-auto">
