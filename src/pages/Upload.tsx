@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ScanLimitModal } from "@/components/ScanLimitModal";
 import AuthRequiredDialog from "@/components/AuthRequiredDialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAnalytics } from "@/hooks/usePostHog";
 
 const UploadPage = () => { 
   const [isDragging, setIsDragging] = useState(false);
@@ -24,6 +25,7 @@ const UploadPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { capture } = useAnalytics();
   const { 
     plan, 
     status,
@@ -214,6 +216,11 @@ const UploadPage = () => {
             reason: fnError.message || "PDF analysis encountered an issue",
             debug: null
           };
+          capture("resume_scanned", {
+            file_type: "pdf",
+            ats_score: null,
+            ats_incompatible: true,
+          });
           navigate("/results", { state: { analysisResult: incompatibleResult } });
           return;
         }
@@ -229,6 +236,11 @@ const UploadPage = () => {
             extracted_length: serverData.extractedLength || 0,
             debug: serverData._debug || null
           };
+          capture("resume_scanned", {
+            file_type: "pdf",
+            ats_score: null,
+            ats_incompatible: true,
+          });
           navigate("/results", { state: { analysisResult: incompatibleResult } });
           return;
         }
@@ -247,6 +259,11 @@ const UploadPage = () => {
             reason: "Could not extract readable text for ATS scoring",
             debug: serverData?._debug || null
           };
+          capture("resume_scanned", {
+            file_type: "pdf",
+            ats_score: null,
+            ats_incompatible: true,
+          });
           navigate("/results", { state: { analysisResult: incompatibleResult } });
           return;
         }
@@ -256,6 +273,11 @@ const UploadPage = () => {
         if (import.meta.env.DEV) {
           console.log("[Resume] PDF analysis complete, ATS score:", atsScore);
         }
+        capture("resume_scanned", {
+          file_type: "pdf",
+          ats_score: atsScore,
+          ats_incompatible: false,
+        });
         navigate("/results", { state: { analysisResult: serverData } });
         return;
         
@@ -292,6 +314,12 @@ const UploadPage = () => {
         console.log("[Resume] DOCX analysis complete, ATS score:", serverData.final_verdict.ats_score);
       }
       
+      capture("resume_scanned", {
+        file_type: "docx",
+        ats_score: serverData.final_verdict.ats_score,
+        ats_incompatible: false,
+      });
+
       // Refresh subscription to update counts
       await refreshSubscription();
       

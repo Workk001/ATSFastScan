@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, Lock, X, ArrowLeft } from "lucide-react";
+import { useAnalytics } from "@/hooks/usePostHog";
 
 const SignIn = () => {
   const [email, setEmail] = useState("");
@@ -19,6 +20,7 @@ const SignIn = () => {
   const { user, signInWithGoogle, signInWithEmail, sendPasswordReset } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { capture } = useAnalytics();
 
   useEffect(() => {
     if (user) {
@@ -50,6 +52,7 @@ const SignIn = () => {
     setIsLoading(true);
     try {
       await signInWithEmail(email, password);
+      capture("user_logged_in", { method: "email" });
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
@@ -80,6 +83,7 @@ const SignIn = () => {
     setIsLoading(true);
     try {
       await signInWithGoogle();
+      capture("user_logged_in", { method: "google" });
       toast({
         title: "Welcome!",
         description: "You have successfully signed in with Google.",

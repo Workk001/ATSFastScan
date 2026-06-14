@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, Lock, User } from "lucide-react";
 import { isAllowedEmailDomain } from "@/lib/emailValidation";
+import { useAnalytics } from "@/hooks/usePostHog";
 
 const SignUp = () => {
   const [firstName, setFirstName] = useState("");
@@ -18,6 +19,7 @@ const SignUp = () => {
   const { user, signInWithGoogle, signUpWithEmail } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { capture } = useAnalytics();
 
   useEffect(() => {
     if (user) {
@@ -76,6 +78,7 @@ const SignUp = () => {
     setIsLoading(true);
     try {
       await signUpWithEmail(email, password);
+      capture("user_signed_up", { method: "email" });
       if (typeof window.gtag === 'function') {
         window.gtag('event', 'ads_conversion_Subscribe_1', {});
       }
@@ -107,6 +110,7 @@ const SignUp = () => {
     setIsLoading(true);
     try {
       await signInWithGoogle();
+      capture("user_signed_up", { method: "google" });
       toast({
         title: "Welcome!",
         description: "You have successfully signed in with Google.",

@@ -10,6 +10,7 @@ import { getFirebaseIdToken } from "@/lib/getFirebaseToken";
 import { useSubscription } from "@/hooks/useSubscription";
 import { ScanLimitModal } from "@/components/ScanLimitModal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAnalytics } from "@/hooks/usePostHog";
 
 const CoverLetterPage = () => {
   const [isDragging, setIsDragging] = useState(false);
@@ -20,6 +21,7 @@ const CoverLetterPage = () => {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { capture } = useAnalytics();
   const { 
     plan, 
     status,
@@ -190,6 +192,11 @@ const CoverLetterPage = () => {
       // Refresh subscription to update counts
       await refreshSubscription();
       
+      capture("cover_letter_scanned", {
+        file_type: fileType,
+        ats_score: data?.ats_score ?? data?.final_verdict?.ats_score ?? null,
+      });
+
       toast({
         title: "Analysis complete",
         description: "Your cover letter has been analyzed successfully",

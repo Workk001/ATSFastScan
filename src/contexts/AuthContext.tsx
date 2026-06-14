@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseAuthRuntime";
 import { toAuthUser, type AuthUser } from "@/lib/firebaseAuthTypes";
+import posthog from "posthog-js";
 
 export interface AuthContextType {
   user: AuthUser | null;
@@ -62,8 +63,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       fb.getRedirectResult?.(fb.auth).catch(() => {});
 
       unsubscribeRef.current = fb.onAuthStateChanged(fb.auth, (rawUser) => {
-        setUser(rawUser ? toAuthUser(rawUser) : null);
+        const authUser = rawUser ? toAuthUser(rawUser) : null;
+        setUser(authUser);
         setLoading(false);
+
+        if (import.meta.env.VITE_POSTHOG_KEY) {
+          if (authUser) {
+            posthog.identify(authUser.uid, {
+              email: authUser.email,
+            });
+          } else {
+            posthog.reset();
+          }
+        }
       });
     } catch {
       setUser(null);

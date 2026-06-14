@@ -6,6 +6,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFirebaseIdToken } from '@/lib/getFirebaseToken';
 import { useAuth } from '@/contexts/AuthContext';
 import type { PlanType, BillingCycle } from '@/lib/pricing';
+import { useAnalytics } from '@/hooks/usePostHog';
+import { useSubscription } from '@/hooks/useSubscription';
 
 // Declare Razorpay on window
 declare global {
@@ -78,6 +80,8 @@ export function UpgradeButton({
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
+  const { capture } = useAnalytics();
+  const { plan: fromPlan } = useSubscription();
 
   const userEmail = useMemo(() => user?.email ?? undefined, [user?.email]);
   const userName = useMemo(() => user?.displayName ?? undefined, [user?.displayName]);
@@ -99,6 +103,12 @@ export function UpgradeButton({
 
   const handleUpgrade = async () => {
     setIsLoading(true);
+    capture("upgrade_clicked", {
+      from_plan: fromPlan,
+      to_plan: planType,
+      billing_cycle: billingCycle,
+      price: price,
+    });
 
     try {
       // Load Razorpay script
@@ -165,6 +175,15 @@ export function UpgradeButton({
               headers: {
                 Authorization: `Bearer ${authToken}`,
               },
+            });
+
+            capture("upgrade_completed", {
+              from_plan: fromPlan,
+              to_plan: planType,
+              billing_cycle: billingCycle,
+              price: price,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_subscription_id: response.razorpay_subscription_id,
             });
 
             toast({

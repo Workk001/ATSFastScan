@@ -10,12 +10,20 @@ import AnimatedRoutes from "@/components/AnimatedRoutes";
 
 const queryClient = new QueryClient();
 
+import { usePageTracking } from "@/hooks/usePageTracking";
+
+const PageTracker = () => {
+  usePageTracking();
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <PageTracker />
         <SpaceGrid />
         <ScrollToTop />
         <Header />
