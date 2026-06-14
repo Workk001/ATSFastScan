@@ -14,6 +14,7 @@ import { getUserSubscriptionInfo } from "../_shared/scan-limits.ts";
 const ALLOWED_ORIGINS = [
   "https://atsfastscan.com",
   "https://www.atsfastscan.com",
+  "https://ats-fast-scan-ra35.vercel.app",
   "http://localhost:8080",
   "http://localhost:5173",
 ];
