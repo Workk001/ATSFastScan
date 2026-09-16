@@ -4,6 +4,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { updateUser, getUserById, logSubscriptionPayment, getExternalSupabaseClient } from "../_shared/external-supabase.ts";
 
+import { captureServerException } from "../_shared/posthog.ts";
+import { timingSafeEqualHex } from "../_shared/crypto.ts";
+
 const ALLOWED_ORIGINS = [
   "https://atsfastscan.com",
   "https://www.atsfastscan.com",
@@ -33,6 +36,11 @@ async function verifyWebhookSignature(
   const secret = Deno.env.get("RAZORPAY_WEBHOOK_SECRET");
   if (!secret) {
     console.error("[Webhook] RAZORPAY_WEBHOOK_SECRET not configured");
+    await captureServerException(
+      "razorpay-webhook",
+      new Error("RAZORPAY_WEBHOOK_SECRET not configured"),
+      { source: "razorpay-webhook", stage: "signature_verification" }
+    );
     return false;
   }
 
@@ -59,9 +67,16 @@ async function verifyWebhookSignature(
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
 
-    return computedSignature === signature;
+    // Constant-time comparison (finding 4.3): `===` on a hex digest stops at the
+    // first differing character, which leaks how much of a guessed signature was
+    // correct and can be walked character by character.
+    return timingSafeEqualHex(computedSignature, signature);
   } catch (error) {
     console.error("[Webhook] Signature verification error:", error);
+    await captureServerException("razorpay-webhook", error, {
+      source: "razorpay-webhook",
+      stage: "signature_verification",
+    });
     return false;
   }
 }
@@ -99,6 +114,11 @@ async function handleSubscriptionActivated(payload: RazorpayWebhookPayload): Pro
   const userId = extractUserIdFromNotes(subscription.notes);
   if (!userId) {
     console.error("[Webhook] No user ID in subscription notes");
+    await captureServerException(
+      "razorpay-webhook",
+      new Error("subscription.activated received without firebase_uid in notes"),
+      { source: "razorpay-webhook", event_type: "subscription.activated" }
+    );
     return;
   }
 
@@ -125,6 +145,11 @@ async function handleSubscriptionCharged(payload: RazorpayWebhookPayload, eventI
   const userId = extractUserIdFromNotes(subscription.notes);
   if (!userId) {
     console.error("[Webhook] No user ID in subscription notes");
+    await captureServerException(
+      "razorpay-webhook",
+      new Error("subscription.charged received without firebase_uid in notes"),
+      { source: "razorpay-webhook", event_type: "subscription.charged" }
+    );
     return;
   }
 
@@ -210,6 +235,11 @@ async function handleSubscriptionCancelled(payload: RazorpayWebhookPayload): Pro
   const userId = extractUserIdFromNotes(subscription.notes);
   if (!userId) {
     console.error("[Webhook] No user ID in subscription notes");
+    await captureServerException(
+      "razorpay-webhook",
+      new Error("subscription.cancelled received without firebase_uid in notes"),
+      { source: "razorpay-webhook", event_type: "subscription.cancelled" }
+    );
     return;
   }
 
@@ -231,7 +261,14 @@ async function handleSubscriptionCompleted(payload: RazorpayWebhookPayload): Pro
   if (!subscription) return;
 
   const userId = extractUserIdFromNotes(subscription.notes);
-  if (!userId) return;
+  if (!userId) {
+    await captureServerException(
+      "razorpay-webhook",
+      new Error("subscription.completed received without firebase_uid in notes"),
+      { source: "razorpay-webhook", event_type: "subscription.completed" }
+    );
+    return;
+  }
 
   // Downgrade to free plan
   await updateUser(userId, {
@@ -265,6 +302,43 @@ async function handlePaymentFailed(payload: RazorpayWebhookPayload, eventId?: st
   }
 }
 
+// Claim an event id before any work is done for it. The insert IS the check:
+// the primary key on razorpay_event_id makes concurrent deliveries race, and the
+// loser gets 23505 and skips. Returns true when this delivery should proceed.
+async function claimWebhookEvent(eventId: string, eventType: string): Promise<boolean> {
+  const supabase = getExternalSupabaseClient();
+  const { error } = await supabase
+    .from("webhook_events")
+    .insert({ razorpay_event_id: eventId, event_type: eventType });
+
+  if (!error) return true;
+
+  if (error.code === "23505") {
+    console.log(`[Webhook] Duplicate event ${eventId} ignored`);
+    return false;
+  }
+
+  // Anything else is not a duplicate, and processing anyway risks running the
+  // event twice. Razorpay retries, so failing the request is the recoverable
+  // choice.
+  console.error("[Webhook] Could not record event id, refusing to process:", error.code, error.message);
+  throw new Error("Could not record webhook event id");
+}
+// Give back a claim whose handler failed, so Razorpay's retry is not swallowed as
+// a duplicate. Only the delivery holding the claim ever calls this.
+async function releaseWebhookEvent(eventId: string): Promise<void> {
+  const supabase = getExternalSupabaseClient();
+  const { error } = await supabase
+    .from("webhook_events")
+    .delete()
+    .eq("razorpay_event_id", eventId);
+
+  if (error) {
+    console.error("[Webhook] Could not release the event claim:", error.code, error.message);
+  }
+}
+
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: getCorsHeaders(req) });
@@ -276,7 +350,9 @@ serve(async (req) => {
 
     // Verify webhook signature
     if (!signature || !(await verifyWebhookSignature(body, signature))) {
-      console.error("[Webhook] Invalid signature");
+      // An invalid signature is an unauthenticated caller, not an incident. It was
+      // reported to PostHog, which let anyone who knows the webhook URL fill the
+      // error stream (finding 4.7). The server-side log line stays.
       return new Response(
         JSON.stringify({ error: "Invalid signature" }),
         { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
@@ -286,45 +362,65 @@ serve(async (req) => {
     const event = JSON.parse(body);
     const eventType = event.event;
     const payload = event.payload;
-    const eventId = event.id || payload?.id;
 
-    if (eventId) {
-      const supabase = getExternalSupabaseClient();
-      const { data: existingEvent } = await supabase
-        .from('subscription_history')
-        .select('id')
-        .eq('razorpay_event_id', eventId)
-        .maybeSingle();
+    // An event id is mandatory. It is the only thing to dedupe on, so without
+    // one a redelivery would re-run the event. The old `event.id || payload?.id`
+    // fallback never fired: the payload object has no `id` field, so the
+    // expression was always just `event.id` (finding 4.5).
+    if (!eventType || typeof eventType !== "string" || typeof event.id !== "string" || event.id.length === 0) {
+      console.error("[Webhook] Event is missing an id or type, refusing to process");
+      return new Response(
+        JSON.stringify({ error: "Malformed event" }),
+        { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
 
-      if (existingEvent) {
-        console.log(`[Webhook] Duplicate event ${eventId} ignored`);
-        return new Response(
-          JSON.stringify({ received: true }),
-          { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
-        );
-      }
+    const eventId = event.id;
+
+    // Claim before dispatching. This replaces a read-then-write check: two
+    // concurrent deliveries of the same event could both read "not seen" and
+    // then both extend the subscription, so the previous guard only stopped
+    // sequential replays (finding 4.4).
+    if (!(await claimWebhookEvent(eventId, eventType))) {
+      return new Response(
+        JSON.stringify({ received: true }),
+        { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
+      );
     }
 
     console.log(`[Webhook] Received event: ${eventType} (ID: ${eventId})`);
 
-    switch (eventType) {
-      case "subscription.activated":
-        await handleSubscriptionActivated(payload);
-        break;
-      case "subscription.charged":
-        await handleSubscriptionCharged(payload, eventId);
-        break;
-      case "subscription.cancelled":
-        await handleSubscriptionCancelled(payload);
-        break;
-      case "subscription.completed":
-        await handleSubscriptionCompleted(payload);
-        break;
-      case "payment.failed":
-        await handlePaymentFailed(payload, eventId);
-        break;
-      default:
-        console.log(`[Webhook] Unhandled event type: ${eventType}`);
+    // The claim is held across the dispatch, so on failure it has to be released -
+    // otherwise an event whose handler crashed would be permanently unprocessable,
+    // because every Razorpay retry would look like a duplicate.
+    try {
+      switch (eventType) {
+        case "subscription.activated":
+          await handleSubscriptionActivated(payload);
+          break;
+        case "subscription.charged":
+          await handleSubscriptionCharged(payload, eventId);
+          break;
+        case "subscription.cancelled":
+          await handleSubscriptionCancelled(payload);
+          break;
+        case "subscription.completed":
+          await handleSubscriptionCompleted(payload);
+          break;
+        case "payment.failed":
+          await handlePaymentFailed(payload, eventId);
+          break;
+        default:
+          console.log(`[Webhook] Unhandled event type: ${eventType}`);
+          await captureServerException(
+            "razorpay-webhook",
+            new Error(`Unhandled Razorpay webhook event type: ${eventType}`),
+            { source: "razorpay-webhook", event_type: eventType }
+          );
+      }
+    } catch (dispatchError) {
+      await releaseWebhookEvent(eventId);
+      throw dispatchError;
     }
 
     return new Response(
@@ -334,6 +430,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error("[Webhook] Error:", error);
+    await captureServerException("razorpay-webhook", error, {
+      source: "razorpay-webhook",
+      stage: "unhandled",
+    });
     return new Response(
       JSON.stringify({ error: "Webhook processing failed" }),
       { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }

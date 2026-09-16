@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFirebaseIdToken } from '@/lib/getFirebaseToken';
 import { useAuth } from '@/contexts/AuthContext';
 import { PLAN_LIMITS, type PlanType } from '@/lib/pricing';
+import { setPersonProperties } from './usePostHog';
 
 interface SubscriptionInfo {
   plan: PlanType;
@@ -73,7 +74,17 @@ export function useSubscription(): UseSubscriptionReturn {
         throw new Error(fnError.message);
       }
 
-      setSubscription(data as SubscriptionInfo);
+      const subscriptionData = data as SubscriptionInfo;
+      setSubscription(subscriptionData);
+
+      // Plan was already fetched here for the session, so mirror it as a person
+      // property rather than issuing another query. Deduped per person + value.
+      if (subscriptionData?.plan) {
+        setPersonProperties(
+          { plan_type: subscriptionData.plan },
+          `plan_type:${subscriptionData.plan}`
+        );
+      }
     } catch (err) {
       console.error('[useSubscription] Error fetching subscription:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch subscription');

@@ -1,10 +1,6 @@
-import { Users, FileCheck, Zap, TrendingUp } from "lucide-react";
-import { useSiteStats } from "@/hooks/useSiteStats";
+import { FileCheck, Zap, TrendingUp } from "lucide-react";
 
 const TrustSection = () => {
-  const { data: stats } = useSiteStats();
-  const totalScans = stats?.totalScans ?? 0;
-
   const displayStats = [
     {
       icon: Zap,
@@ -19,12 +15,6 @@ const TrustSection = () => {
       gradient: "from-primary to-cyan-400",
     },
     {
-      icon: Users,
-      value: totalScans > 0 ? `${totalScans}+` : "500+",
-      label: "Resumes Scanned",
-      gradient: "from-primary to-sky-400",
-    },
-    {
       icon: FileCheck,
       value: "87%",
       label: "Users Improved Their Score",
@@ -35,7 +25,7 @@ const TrustSection = () => {
   return (
     <section className="py-10 sm:py-14 lg:py-16 relative -mt-4 sm:-mt-6">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 lg:gap-8 max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 lg:gap-8 max-w-5xl mx-auto">
           {displayStats.map((stat, index) => (
             <div
               key={stat.label}

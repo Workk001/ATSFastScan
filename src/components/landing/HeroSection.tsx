@@ -1,11 +1,19 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Users, CheckCircle } from "lucide-react";
+import { ArrowRight, Users, CheckCircle, FileText, Mail } from "lucide-react";
 import HeroFlipCard from "./HeroFlipCard";
 import { useSiteStats } from "@/hooks/useSiteStats";
 
 const HeroSection = () => {
   const { data: stats } = useSiteStats();
+
+  const socialProof = stats
+    ? [
+        { icon: Users, value: stats.totalUsers, label: "users" },
+        { icon: FileText, value: stats.totalResumes, label: "resumes scanned" },
+        { icon: Mail, value: stats.totalCoverLetters, label: "cover letters scanned" },
+      ].filter((item) => item.value > 0)
+    : [];
 
   return (
     <section className="relative min-h-0 pt-20 pb-10 sm:pt-32 sm:pb-20 xl:min-h-[calc(100vh-5rem)] flex items-center overflow-hidden xl:pt-32 xl:pb-20">
@@ -55,11 +63,16 @@ const HeroSection = () => {
                 ))}
               </div>
 
-              {/* Social Proof Counter */}
-              {stats && stats.totalScans > 0 && (
-                <div className="flex items-center justify-center xl:justify-start gap-2 text-xs text-muted-foreground">
-                  <Users className="w-3.5 h-3.5 text-primary" />
-                  <span className="font-semibold text-foreground">{stats.totalScans.toLocaleString()}+</span> resumes scanned so far
+              {/* Social Proof Counters */}
+              {socialProof.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center xl:justify-start gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                  {socialProof.map(({ icon: Icon, value, label }) => (
+                    <span key={label} className="flex items-center gap-1.5">
+                      <Icon className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="font-semibold text-foreground">{value.toLocaleString()}+</span>
+                      {label}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>

@@ -10,6 +10,7 @@ import {
   logSubscriptionPayment 
 } from "../_shared/external-supabase.ts";
 import { getUserSubscriptionInfo } from "../_shared/scan-limits.ts";
+import { timingSafeEqualHex } from "../_shared/crypto.ts";
 
 const ALLOWED_ORIGINS = [
   "https://atsfastscan.com",
@@ -362,7 +363,9 @@ async function verifyRazorpaySignature(
     .map(b => b.toString(16).padStart(2, "0")).join("");
 
   console.log(`[Subscription] Payment signature verification for ${subscriptionId}`);
-  return computed === signature;
+  // Constant-time comparison (finding 4.3): `===` on a hex digest stops at the
+  // first differing character, leaking how much of a guessed signature was right.
+  return timingSafeEqualHex(computed, signature);
 }
 
 // Cancel subscription handler
@@ -450,9 +453,18 @@ serve(async (req) => {
     if (path === "create-subscription") {
       const { planType, billingCycle, email: bodyEmail, name: bodyName } = body;
 
-      // ALWAYS prefer frontend email — most reliable source (comes from user.email in AuthContext)
-      if (bodyEmail) {
-        email = bodyEmail;
+      // The verified token's email wins (finding 4.8). The request body used to
+      // take precedence unconditionally, and getOrCreateRazorpayCustomer looks a
+      // customer up BY EMAIL - so a caller holding a valid token for their own
+      // address could name someone else's address and have the new subscription
+      // attached to that person's Razorpay customer.
+      //
+      // The body is still used when the token carries no email, which is the case
+      // for sign-in providers that do not supply one.
+      if (!email && typeof bodyEmail === "string" && bodyEmail.trim().length > 0) {
+        email = bodyEmail.trim();
+      } else if (bodyEmail && bodyEmail !== email) {
+        console.warn(`[Subscription] Ignoring body email for ${userId}: verified token email takes precedence`);
       }
       
       if (!['plus', 'pro'].includes(planType)) {

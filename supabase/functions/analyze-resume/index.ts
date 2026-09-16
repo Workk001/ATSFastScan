@@ -1,12 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { 
   verifyFirebaseToken, 
-  validateFileInput 
+  validateFileInput,
+  MAX_TEXT_LENGTH
 } from "../_shared/firebase-auth.ts";
 import { 
   checkScanLimit, 
   getUserSubscriptionInfo 
 } from "../_shared/scan-limits.ts";
+import {
+  captureServerEvent,
+  captureServerException,
+} from "../_shared/posthog.ts";
+import {
+  MAX_TEXT_LENGTH,
+  sanitizeUntrustedText,
+} from "../_shared/sanitize.ts";
 
 const ALLOWED_ORIGINS = [
   "https://atsfastscan.com",
@@ -29,6 +38,39 @@ function getCorsHeaders(req: Request): Record<string, string> {
   };
 }
 
+// Server-side PDF extraction limits (findings 5.2, 5.3). A crafted document can
+// declare an enormous page count, and a small file can inflate into a very large
+// one, so the page walk and the character budget are both bounded and the parse
+// itself is given a deadline.
+const MAX_PDF_PAGES = 50;
+const MAX_EXTRACTED_CHARS = 200000;
+const PDF_EXTRACTION_TIMEOUT_MS = 20000;
+
+// Debug payloads are opt-in (finding 6.1). `_debug` echoes a slice of the
+// candidate's resume back to the caller, so it stays off unless deliberately
+// switched on for a debugging session.
+const DEBUG_PAYLOAD_ENABLED = Deno.env.get("EXPOSE_DEBUG_PAYLOAD") === "true";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+// Short digest used in place of provider response bodies, which can echo request
+// content back to the caller (findings 6.2, 8.3).
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
+}
+
 // PDF extraction using pdfjs-serverless (more robust than pdf-parse)
 async function extractTextFromPdfServerSide(base64Data: string): Promise<string> {
   console.log("[PDF] Starting server-side extraction with pdfjs-serverless...");
@@ -48,14 +90,31 @@ async function extractTextFromPdfServerSide(base64Data: string): Promise<string>
     const resolvePDFJS = pdfjsModule.resolvePDFJS;
     const pdfjs = await resolvePDFJS();
     
-    const document = await pdfjs.getDocument({ data: bytes }).promise;
+    const document = await withTimeout(
+      pdfjs.getDocument({ data: bytes }).promise,
+      PDF_EXTRACTION_TIMEOUT_MS,
+      "PDF parsing timed out",
+    );
     const numPages = document.numPages;
     console.log("[PDF] Document has", numPages, "pages");
     
-    const textParts: string[] = [];
+    // Bound the work. A crafted file can declare far more pages than a resume
+    // can plausibly have, and walking all of them is what makes it expensive
+    // (finding 5.3).
+    const lastPage = Math.min(numPages, MAX_PDF_PAGES);
+    if (numPages > MAX_PDF_PAGES) {
+      console.warn("[PDF] Page count", numPages, "exceeds cap of", MAX_PDF_PAGES, "- reading first", MAX_PDF_PAGES);
+    }
     
-    // Extract text from all pages
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    const textParts: string[] = [];
+    let collectedChars = 0;
+    
+    // Extract page by page, stopping once the character budget is spent.
+    for (let pageNum = 1; pageNum <= lastPage; pageNum++) {
+      if (collectedChars >= MAX_EXTRACTED_CHARS) {
+        console.warn("[PDF] Character budget reached, ignoring remaining pages");
+        break;
+      }
       try {
         const page = await document.getPage(pageNum);
         const textContent = await page.getTextContent();
@@ -63,6 +122,7 @@ async function extractTextFromPdfServerSide(base64Data: string): Promise<string>
           .map((item: { str?: string }) => item.str || "")
           .join(" ");
         textParts.push(pageText);
+        collectedChars += pageText.length;
       } catch (pageError) {
         console.warn(`[PDF] Failed to extract page ${pageNum}:`, pageError);
       }
@@ -70,8 +130,9 @@ async function extractTextFromPdfServerSide(base64Data: string): Promise<string>
     
     const extractedText = textParts.join("\n").replace(/\s+/g, " ").trim();
     
+    // Length only. The first 300 characters used to be logged here too, which
+    // put candidate resume content into function logs (finding 8.3).
     console.log("[PDF] pdfjs-serverless extracted text length:", extractedText.length);
-    console.log("[PDF] First 300 chars:", extractedText.substring(0, 300));
     
     return extractedText;
   } catch (error) {
@@ -94,39 +155,33 @@ const ROLE_KEYWORDS: Record<string, string[]> = {
   "ML Engineer": ["Python", "TensorFlow", "PyTorch", "MLOps", "Docker", "Kubernetes", "Feature Engineering", "Model Deployment", "AWS SageMaker", "Deep Learning"],
 };
 
-function sanitizeInput(text: string): string {
-  return text
-    .replace(/ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/gi, '[removed]')
-    .replace(/you\s+are\s+now\s+/gi, '[removed]')
-    .replace(/act\s+as\s+(a\s+)?/gi, '[removed]')
-    .replace(/system\s*prompt/gi, '[removed]')
-    .replace(/jailbreak/gi, '[removed]')
-    .replace(/new\s+instructions?/gi, '[removed]')
-    .replace(/override\s+(previous\s+)?instructions?/gi, '[removed]')
-    .slice(0, 15000);
-}
+// Prompt-injection defence for untrusted document text now lives in
+// _shared/sanitize.ts (findings 5.1, 5.7). The two byte-identical private copies
+// that lived here and in analyze-cover-letter had drifted from the patterns they
+// were meant to match, so there is one implementation instead of two.
 
-function isValidPDF(base64Content: string): boolean {
+// Identify the container from its magic bytes. The old check only accepted
+// "%PDF" (finding 5.6), so a renamed DOCX passed it and then failed deep inside
+// the PDF parser with a message the user could not act on.
+function sniffContainer(base64Content: string): 'pdf' | 'zip' | 'unknown' {
   try {
     const bytes = Uint8Array.from(
       atob(base64Content.slice(0, 8)),
       c => c.charCodeAt(0)
     );
-    // All valid PDFs start with %PDF (25 50 44 46)
-    return bytes[0] === 0x25 &&
-           bytes[1] === 0x50 &&
-           bytes[2] === 0x44 &&
-           bytes[3] === 0x46;
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+      return 'pdf';
+    }
+    // DOCX, and every other OOXML document, is a ZIP archive.
+    if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+      return 'zip';
+    }
+    return 'unknown';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 
-function isValidFileSize(base64Content: string): boolean {
-  const approximateBytes = base64Content.length * 0.75;
-  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-  return approximateBytes <= MAX_SIZE;
-}
 
 function buildSystemPrompt(hasJobDescription: boolean): string {
   const roleKeywordsJson = JSON.stringify(ROLE_KEYWORDS, null, 2);
@@ -324,39 +379,26 @@ serve(async (req) => {
     console.log("Authenticated user:", userId);
     
 
-    // ===== SCAN LIMIT CHECK =====
-    const scanLimitCheck = await checkScanLimit(userId, userEmail, 'resume');
-    if (!scanLimitCheck.allowed) {
-      console.warn("Scan limit exceeded for user:", userId, scanLimitCheck);
-      return new Response(
-        JSON.stringify({ 
-          error: scanLimitCheck.upgradeMessage || 'Monthly scan limit reached.',
-          code: 'SCAN_LIMIT_EXCEEDED',
-          requiresUpgrade: true,
-          planInfo: {
-            plan: scanLimitCheck.planType,
-            used: scanLimitCheck.used,
-            limit: scanLimitCheck.limit,
-          }
-        }),
-        { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
-      );
-    }
-    
     const { resumeText, pdfBase64, fileName, fileType, jobDescription } = await req.json();
 
+    // The size check that used to live here allowed 10MB while the shared
+    // validator and the client both enforce MAX_FILE_SIZE_MB (5MB), so whether a
+    // 7MB file was accepted depended on which check ran first (finding 5.4). Size
+    // is now enforced in exactly one place: validateFileInput below.
     if (pdfBase64 && pdfBase64.length > 0) {
-      if (!isValidFileSize(pdfBase64)) {
+      // This branch is the PDF path, so a real PDF is required. Matching on magic
+      // bytes instead of the declared type stops a renamed DOCX from reaching the
+      // PDF parser, where it failed deep inside with an error the user could not
+      // act on (finding 5.6).
+      const container = sniffContainer(pdfBase64);
+      if (container !== 'pdf') {
+        console.error("REJECTED: fileType", fileType || "unset", "but container is", container);
         return new Response(
-          JSON.stringify({ error: 'File too large. Maximum 10MB.' }),
-          { status: 400, headers: getCorsHeaders(req) }
-        );
-      }
-
-      if (!isValidPDF(pdfBase64)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid file format.' }),
-          { status: 400, headers: getCorsHeaders(req) }
+          JSON.stringify({
+            error: 'This file is not a valid PDF. Please upload a PDF, or the original DOCX.',
+            code: 'INVALID_FILE_FORMAT'
+          }),
+          { status: 400, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
         );
       }
     }
@@ -387,7 +429,8 @@ serve(async (req) => {
       // DOCX path: text already extracted on frontend
       console.log("[DOCX] Using pre-extracted text from frontend");
       console.log("[DOCX] Resume text length:", resumeText.length);
-      console.log("[DOCX] First 300 chars:", resumeText.substring(0, 300));
+      // The first 300 characters were previously logged here, which put
+      // candidate resume content into function logs (finding 8.3).
       textToAnalyze = resumeText;
       extractedTextLength = resumeText.length;
       textPreview = resumeText.substring(0, 500);
@@ -399,10 +442,15 @@ serve(async (req) => {
       try {
         textToAnalyze = await extractTextFromPdfServerSide(pdfBase64);
         extractedTextLength = textToAnalyze.length;
-        textPreview = textToAnalyze.substring(0, 500);
+        if (DEBUG_PAYLOAD_ENABLED) textPreview = textToAnalyze.substring(0, 500);
         console.log("[PDF] Server extraction complete, length:", extractedTextLength);
       } catch (extractionError) {
         console.error("[PDF] Server extraction failed:", extractionError);
+        await captureServerEvent(userId, "scan_incompatible_result", {
+          file_type: "pdf",
+          reason: "text_extraction_failed",
+          source: "analyze-resume",
+        });
         return new Response(
           JSON.stringify({ 
             error: "Could not extract text from this PDF. Please upload a DOCX or a PDF exported from Word/Google Docs.",
@@ -421,8 +469,8 @@ serve(async (req) => {
     }
     
     // ===== SANITIZE INPUT =====
-    textToAnalyze = sanitizeInput(textToAnalyze);
-    const sanitizedJobDescription = jobDescription ? sanitizeInput(jobDescription) : "";
+    textToAnalyze = sanitizeUntrustedText(textToAnalyze, MAX_TEXT_LENGTH);
+    const sanitizedJobDescription = jobDescription ? sanitizeUntrustedText(jobDescription) : "";
 
     // VALIDATION - SPLIT BY FILE TYPE
     const trimmedText = textToAnalyze.trim();
@@ -435,6 +483,11 @@ serve(async (req) => {
     // DOCX: STRICT - reject if < 200 characters
     if (trimmedText.length === 0) {
       console.error("REJECTED: Empty text after extraction");
+      await captureServerEvent(userId, "scan_incompatible_result", {
+        file_type: isPdf ? "pdf" : "docx",
+        reason: "text_completely_empty",
+        source: "analyze-resume",
+      });
       return new Response(
         JSON.stringify({ 
           error: "No readable text found in this file.",
@@ -449,6 +502,12 @@ serve(async (req) => {
     // DOCX: Strict validation - require 200+ characters
     if (!isPdf && trimmedText.length < 200) {
       console.error("REJECTED: DOCX text too short -", trimmedText.length, "characters");
+      await captureServerEvent(userId, "scan_incompatible_result", {
+        file_type: "docx",
+        reason: "docx_text_too_short",
+        text_length: trimmedText.length,
+        source: "analyze-resume",
+      });
       return new Response(
         JSON.stringify({ 
           error: `Resume text is too short (${trimmedText.length} characters). Please upload a valid resume.`,
@@ -478,6 +537,30 @@ serve(async (req) => {
       userPrompt += `\n\n--- JOB DESCRIPTION ---\n${sanitizedJobDescription}\n\nPlease compare the resume against this job description and include the jd_match analysis.`;
     }
 
+    // ===== SCAN LIMIT CHECK =====
+    // Charged here, immediately before the provider call, rather than at the top
+    // of the handler (finding 3.2). Checking in earlier consumed a scan for
+    // requests that were then rejected on validation or on text extraction: the
+    // user paid a scan and received no analysis, with no refund. Nothing above
+    // this line can cost the provider money, so nothing above it should charge.
+    const scanLimitCheck = await checkScanLimit(userId, userEmail, 'resume');
+    if (!scanLimitCheck.allowed) {
+      console.warn("Scan limit exceeded for user:", userId, scanLimitCheck);
+      return new Response(
+        JSON.stringify({ 
+          error: scanLimitCheck.upgradeMessage || 'Monthly scan limit reached.',
+          code: 'SCAN_LIMIT_EXCEEDED',
+          requiresUpgrade: true,
+          planInfo: {
+            plan: scanLimitCheck.planType,
+            used: scanLimitCheck.used,
+            limit: scanLimitCheck.limit,
+          }
+        }),
+        { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${Deno.env.get("GEMINI_API_KEY")}`, {
       method: "POST",
       headers: {
@@ -501,7 +584,21 @@ serve(async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Gemini API error:", response.status, errorText);
+      // A provider error body can echo the request back, which here means
+      // candidate resume text. Record a digest rather than the body, in the
+      // server log and in PostHog alike (findings 6.2, 8.3).
+      const errorDigest = await sha256Hex(errorText);
+      console.error("Gemini API error:", response.status, "body digest:", errorDigest);
+      await captureServerException(
+        userId,
+        new Error(`Gemini API error ${response.status} (body digest ${errorDigest})`),
+        {
+          source: "analyze-resume",
+          model: "gemini-2.5-flash",
+          status: response.status,
+          body_digest: errorDigest,
+        }
+      );
       
       if (response.status === 429) {
         return new Response(
@@ -527,7 +624,15 @@ serve(async (req) => {
 
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!content) {
-      console.error("No content in AI response:", JSON.stringify(data));
+      // The response shape, not the response. Dumping the whole provider object
+      // can echo request content, which here is candidate resume text (8.3).
+      const finishReason = data.candidates?.[0]?.finishReason ?? "none";
+      const blocked = data.promptFeedback?.blockReason ?? "none";
+      console.error("No content in AI response. finishReason:", finishReason, "blockReason:", blocked);
+      await captureServerException(userId, new Error("Gemini returned no content"), {
+        source: "analyze-resume",
+        model: "gemini-2.5-flash",
+      });
       return new Response(
         JSON.stringify({ error: "Invalid response from AI service" }),
         { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
@@ -583,7 +688,14 @@ serve(async (req) => {
       console.log("Successfully parsed analysis result, ATS score:", analysisResult.final_verdict?.ats_score);
     } catch (parseError) {
       console.error("Failed to parse AI response as JSON:", parseError);
-      console.error("Raw content:", content.substring(0, 500));
+      // The raw model output is not logged: it is derived from the candidate's
+      // resume (finding 8.3).
+      await captureServerEvent(userId, "scan_fallback_triggered", {
+        file_type: isPdf ? "pdf" : "docx",
+        reason: "json_parse_failed",
+        fallback_returned: true,
+        source: "analyze-resume",
+      });
       
       // Return fallback result
       const fallbackResult = {
@@ -659,17 +771,15 @@ serve(async (req) => {
         ]
       };
       
-      // Add debug info to fallback response for consistency
-      const fallbackWithDebug = {
-        ...fallbackResult,
-        _debug: {
-          extractedTextLength: extractedTextLength,
-          textPreview: textPreview
-        }
-      };
+      // Debug payload is opt-in (finding 6.1). It echoes a slice of the
+      // candidate's resume back to the caller, so it does not ship unless
+      // deliberately switched on.
+      const fallbackPayload = DEBUG_PAYLOAD_ENABLED
+        ? { ...fallbackResult, _debug: { extractedTextLength, textPreview } }
+        : fallbackResult;
       
       return new Response(
-        JSON.stringify(fallbackWithDebug),
+        JSON.stringify(fallbackPayload),
         { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
       );
     }
@@ -677,7 +787,10 @@ serve(async (req) => {
 
     // ===== INCREMENT GLOBAL SITE STATS =====
     try {
-      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+      // Pinned to an exact version. An unpinned "@supabase/supabase-js@2" is a
+      // supply-chain dependency re-resolved on every cold start, and this client
+      // runs with the service-role key in scope (finding 8.1).
+      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.89.0");
       const cloudSupabase = createClient(
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -691,20 +804,18 @@ serve(async (req) => {
     // Get subscription info for response
     const subscriptionInfo = await getUserSubscriptionInfo(userId, userEmail);
 
-    // Add debug info and subscription info to response for frontend
+    // Subscription info always goes to the frontend; the debug payload only when
+    // explicitly enabled (finding 6.1).
     const responseData = {
       ...analysisResult,
-      _debug: {
-        extractedTextLength: extractedTextLength,
-        textPreview: textPreview
-      },
+      ...(DEBUG_PAYLOAD_ENABLED
+        ? { _debug: { extractedTextLength, textPreview } }
+        : {}),
       _subscription: subscriptionInfo
     };
 
     console.log("=== FINAL RESPONSE ===");
     console.log("_debug present:", !!responseData._debug);
-    console.log("_debug.extractedTextLength:", responseData._debug.extractedTextLength);
-    console.log("_debug.textPreview length:", responseData._debug.textPreview?.length || 0);
     console.log("_subscription:", responseData._subscription);
 
     return new Response(

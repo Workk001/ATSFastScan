@@ -19,18 +19,21 @@ export type Database = {
           id: string
           total_cover_letter_scans: number
           total_resume_scans: number
+          total_users: number
           updated_at: string
         }
         Insert: {
           id?: string
           total_cover_letter_scans?: number
           total_resume_scans?: number
+          total_users?: number
           updated_at?: string
         }
         Update: {
           id?: string
           total_cover_letter_scans?: number
           total_resume_scans?: number
+          total_users?: number
           updated_at?: string
         }
         Relationships: []

@@ -31,3 +31,8 @@ supabase/functions/.env
 *.njsproj
 *.sln
 *.sw?
+
+# Markdown notes and agent artifacts - repo docs stay tracked
+*.md
+!README.md
+!CLAUDE.md

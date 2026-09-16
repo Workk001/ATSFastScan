@@ -68,12 +68,21 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         setLoading(false);
 
         if (import.meta.env.VITE_POSTHOG_KEY) {
-          if (authUser) {
-            posthog.identify(authUser.uid, {
-              email: authUser.email,
-            });
-          } else {
-            posthog.reset();
+          try {
+            if (authUser) {
+              // signup_date comes from Firebase auth metadata already in memory here,
+              // so no extra query is needed. plan_type is attached separately by
+              // useSubscription once /subscription/status has resolved.
+              const creationTime = rawUser?.metadata?.creationTime;
+              posthog.identify(authUser.uid, {
+                email: authUser.email,
+                signup_date: creationTime ? new Date(creationTime).toISOString() : null,
+              });
+            } else {
+              posthog.reset();
+            }
+          } catch {
+            // Analytics must never break the auth listener.
           }
         }
       });

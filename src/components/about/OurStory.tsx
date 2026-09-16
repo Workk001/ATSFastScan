@@ -12,12 +12,12 @@ const SectionDivider = () => (
 
 const OurStory = () => {
   const { data: siteStats } = useSiteStats();
-  const totalScans = siteStats?.totalScans ?? 0;
+  const totalResumes = siteStats?.totalResumes ?? 0;
 
   const stats = [
     {
       icon: Users,
-      value: totalScans > 0 ? `${totalScans}+` : "50+",
+      value: totalResumes > 0 ? `${totalResumes}+` : "—",
       label: "Resumes Optimized",
       gradient: "from-primary to-primary-glow",
     },

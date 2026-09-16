@@ -175,6 +175,30 @@ function extractPdfText(buffer: ArrayBuffer): string {
   return normalizeText(text);
 }
 
+// Cap on how much content a DOCX may declare, mirroring the server-side guard in
+// analyze-cover-letter. Two orders of magnitude beyond any real document.
+const MAX_DOCX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Total uncompressed size the archive declares, or null when JSZip does not
+ * expose it. This reads JSZip's internal size bookkeeping because the public API
+ * has no size accessor. If a future version renames the field the check is simply
+ * skipped, and the server-side guard remains the real boundary.
+ */
+function declaredUncompressedSize(zip: { files: Record<string, unknown> }): number | null {
+  let total = 0;
+  let sawAny = false;
+  for (const entry of Object.values(zip.files)) {
+    const data = (entry as { _data?: { uncompressedSize?: unknown } })?._data;
+    const size = data?.uncompressedSize;
+    if (typeof size === 'number' && Number.isFinite(size)) {
+      total += size;
+      sawAny = true;
+    }
+  }
+  return sawAny ? total : null;
+}
+
 /**
  * Extract text from DOCX using JSZip
  */
@@ -182,6 +206,17 @@ async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
   try {
     const JSZip = (await import('jszip')).default;
     const zip = await JSZip.loadAsync(buffer);
+
+    // A DOCX is a ZIP, and a small archive can declare a very large amount of
+    // content - the classic decompression bomb. Inflating it would happen in the
+    // user's own tab, so it is refused up front. Only the declared sizes are read
+    // here; the archive is never inflated in order to measure it (finding 5.2).
+    const totalUncompressed = declaredUncompressedSize(zip);
+    if (totalUncompressed !== null && totalUncompressed > MAX_DOCX_UNCOMPRESSED_BYTES) {
+      console.error(`[Extraction] DOCX declares ${totalUncompressed} uncompressed bytes, over the limit`);
+      return '';
+    }
+
     const documentXml = await zip.file('word/document.xml')?.async('string');
     
     if (!documentXml) {

@@ -82,14 +82,31 @@ export async function getOrCreateUser(
     .maybeSingle();
 
   if (userByEmail) {
-    // Update firebase_uid to new one
-    const { data: updated } = await supabase
+    // Rebind the existing row to the Firebase UID presenting this email.
+    //
+    // The update's error used to be discarded and the resulting (null) data cast
+    // straight to UserRecord, so any failure - most commonly a unique violation
+    // on firebase_uid, or a row deleted between the read and the write - handed
+    // the caller an object with no id and the callers then persisted against
+    // `undefined`. Check the outcome properly: on failure, log and fall through to
+    // step 3 rather than returning a phantom user.
+    const { data: updated, error: updateError } = await supabase
       .from('users')
       .update({ firebase_uid: firebaseUid })
       .eq('id', userByEmail.id)
       .select()
       .single();
-    return updated as UserRecord;
+
+    if (!updateError && updated) return updated as UserRecord;
+
+    // Suppressed on purpose is not the case here - the detail matters for
+    // diagnosing a rebind that keeps failing for one account.
+    console.error(
+      "[ExternalDB] Failed to rebind firebase_uid on existing email row:",
+      updateError
+        ? (updateError.code ?? "") + " " + updateError.message
+        : "update returned no row",
+    );
   }
 
   // Step 3: Create new user

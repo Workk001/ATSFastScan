@@ -7,11 +7,14 @@ const GOOGLE_CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/secu
 interface FirebaseTokenPayload {
   iss: string;
   aud: string;
-  auth_time: number;
-  user_id: string;
-  sub: string;
-  iat: number;
-  exp: number;
+  // Required by Firebase, declared optional on purpose. At runtime a hand-made
+  // token can simply omit any of these, and declaring them required would let the
+  // type system hide that the guards below are load-bearing.
+  auth_time?: number;
+  user_id?: string;
+  sub?: string;
+  iat?: number;
+  exp?: number;
   email?: string;
   email_verified?: boolean;
   firebase: {
@@ -239,6 +242,14 @@ async function verifySignature(token: string, publicKey: CryptoKey): Promise<boo
   }
 }
 
+// A NumericDate is a JSON number of seconds since epoch. Checked as a number
+// rather than merely compared, because comparisons silently pass on absence:
+// `undefined < now` and `undefined > now` are both false, so every one of the
+// time checks below was a no-op for a token that omitted the claim.
+function isNumericDate(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 // Verify Firebase ID token with full signature verification
 export async function verifyFirebaseToken(authHeader: string | null): Promise<VerificationResult> {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -281,16 +292,25 @@ export async function verifyFirebaseToken(authHeader: string | null): Promise<Ve
 
   // Validate expiration
   const now = Math.floor(Date.now() / 1000);
+  if (!isNumericDate(payload.exp)) {
+    return { valid: false, error: 'Missing or non-numeric exp claim' };
+  }
   if (payload.exp < now) {
     return { valid: false, error: 'Token has expired' };
   }
 
   // Validate issued at time (not in the future, with 5 min clock skew)
+  if (!isNumericDate(payload.iat)) {
+    return { valid: false, error: 'Missing or non-numeric iat claim' };
+  }
   if (payload.iat > now + 300) {
     return { valid: false, error: 'Token issued in the future' };
   }
 
   // Validate auth_time is in the past
+  if (!isNumericDate(payload.auth_time)) {
+    return { valid: false, error: 'Missing or non-numeric auth_time claim' };
+  }
   if (payload.auth_time > now + 300) {
     return { valid: false, error: 'auth_time is in the future' };
   }
@@ -298,6 +318,15 @@ export async function verifyFirebaseToken(authHeader: string | null): Promise<Ve
   // Validate sub (subject) is present and non-empty
   if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.length === 0) {
     return { valid: false, error: 'Invalid token subject' };
+  }
+
+  // Firebase sets `user_id` and `sub` to the same value, and callers across this
+  // codebase read whichever one they happen to reach for. A token where the two
+  // disagree is either malformed or hand-built to satisfy one reader while
+  // meaning something else to another, so require them to agree instead of
+  // silently trusting one of them.
+  if (payload.user_id !== payload.sub) {
+    return { valid: false, error: 'Token subject mismatch' };
   }
 
   // Fetch Google's public certificates and verify signature
@@ -323,7 +352,8 @@ export async function verifyFirebaseToken(authHeader: string | null): Promise<Ve
   // Token is valid
   return {
     valid: true,
-    userId: payload.user_id || payload.sub,
+    // `sub` was proved equal to `user_id` above, and is the claim the checks ran on.
+    userId: payload.sub,
     email: payload.email,
   };
 }
@@ -333,7 +363,15 @@ export async function verifyFirebaseToken(authHeader: string | null): Promise<Ve
 export const MAX_FILE_SIZE_MB = 5;
 export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 export const MAX_BASE64_SIZE = Math.ceil(MAX_FILE_SIZE_BYTES * 1.37); // Account for base64 overhead
-export const MAX_TEXT_LENGTH = 100000; // ~100KB of text
+// Document text that is actually analysed. This is the number the sanitizer
+// truncates to, so it is the real cap and not an aspirational ceiling that the
+// pipeline quietly undercuts further down (finding 5.5). Previously declared as
+// 100000 here while every caller truncated to 15000.
+export const MAX_TEXT_LENGTH = 15000;
+// Ceiling on document text arriving in one request. Deliberately larger than
+// MAX_TEXT_LENGTH: content past the analysed cap is truncated, not rejected, so
+// an unusually long resume still gets analysed instead of erroring out.
+export const MAX_PAYLOAD_TEXT_LENGTH = 100000;
 export const MAX_JD_LENGTH = 10000; // 10K chars for job description
 export const ALLOWED_FILE_TYPES = ['pdf', 'docx', 'doc'];
 
@@ -369,8 +407,8 @@ export function validateFileInput(
     }
   }
 
-  // Validate text length
-  if (text && text.length > MAX_TEXT_LENGTH) {
+  // Payload ceiling, not the analysed-content cap - see MAX_PAYLOAD_TEXT_LENGTH.
+  if (text && text.length > MAX_PAYLOAD_TEXT_LENGTH) {
     return {
       valid: false,
       error: 'Document text is too large',

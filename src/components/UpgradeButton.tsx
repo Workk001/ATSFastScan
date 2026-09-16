@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFirebaseIdToken } from '@/lib/getFirebaseToken';
 import { useAuth } from '@/contexts/AuthContext';
 import type { PlanType, BillingCycle } from '@/lib/pricing';
+import { PLAN_PRICING } from '@/lib/pricing';
 import { useAnalytics } from '@/hooks/usePostHog';
 import { useSubscription } from '@/hooks/useSubscription';
 
@@ -170,18 +171,32 @@ export function UpgradeButton({
         },
         handler: async (response) => {
           try {
-            await supabase.functions.invoke('subscription/verify-payment', {
+            const verifyResult = await supabase.functions.invoke('subscription/verify-payment', {
               body: response,
               headers: {
                 Authorization: `Bearer ${authToken}`,
               },
             });
 
+            // Revenue properties. plan_type / billing_cycle come from the response that
+            // confirmed the subscription when present, otherwise from the plan the user
+            // checked out with. amount_paise matches the unit used by
+            // subscription_history.amount; amount is the same value in rupees.
+            const verified = (verifyResult?.data ?? {}) as {
+              plan_type?: string;
+              billing_cycle?: string;
+              amount_paise?: number;
+            };
+            const amountPaise = verified.amount_paise ?? PLAN_PRICING[planType][billingCycle];
+
             capture("upgrade_completed", {
               from_plan: fromPlan,
               to_plan: planType,
-              billing_cycle: billingCycle,
+              plan_type: verified.plan_type ?? planType,
+              billing_cycle: verified.billing_cycle ?? billingCycle,
               price: price,
+              amount: amountPaise / 100,
+              amount_paise: amountPaise,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_subscription_id: response.razorpay_subscription_id,
             });
