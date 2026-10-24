@@ -116,7 +116,7 @@ The platform has undergone rigorous security hardening to prevent common vulnera
 
 ### Clone and Install
 ```bash
-git clone https://github.com/your-username/atsfastscan.git
+git clone https://github.com/Workk001/atsfastscan.git
 cd atsfastscan
 npm install
 ```
